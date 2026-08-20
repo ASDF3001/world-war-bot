@@ -116,7 +116,10 @@ def get_promo_and_tip():
         except Exception: pass
     return res
 
-def get_db_connection(): return sqlite3.connect(DB_FILE, timeout=20.0)
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE, timeout=60.0)
+    conn.execute("PRAGMA busy_timeout = 60000;")
+    return conn
 
 def init_db():
     try:
@@ -380,18 +383,14 @@ supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_
 
 @tasks.loop(minutes=1)
 async def sync_supabase_task():
-    if not supabase_client:
-        logger.warning("Supabase設定がありません。同期をスキップします。")
-        return
-    if not bot.is_ready():
-        return
+    if not supabase_client or not bot.is_ready(): return
     try:
-        logger.info("Supabase同期タスクを実行中...")
+        # 1. DBからデータを一瞬でメモリに吸い出して即クローズ（ロック防止）
+        worlds_payload = []
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT DISTINCT guild_id, world_id FROM territories")
             active_worlds = c.fetchall()
-            logger.info(f"同期対象のワールド数: {len(active_worlds)}")
             
             for guild_id, w_id in active_worlds:
                 # 領土ランキング
@@ -399,19 +398,16 @@ async def sync_supabase_task():
                 t_ranks = c.fetchall()
                 territory_leaderboard = []
                 for uid, count in t_ranks:
-                    # 匿名性確保のため、プレイヤー名をハッシュ化するか、一部伏せ字にするなどの処理も可能だが、
-                    # まずはそのまま表示するか、「Player_XXX」にする。
                     c.execute("SELECT user_name, title, main_country FROM players WHERE user_id=? AND guild_id=? AND world_id=?", (uid, guild_id, w_id))
                     p = c.fetchone()
                     if p:
-                        # 匿名モード: ユーザー名を出さずに国コードだけにするか、設定で分けるか
                         territory_leaderboard.append({"name": "Secret Player", "title": p[1], "country": p[2], "territories": count})
                 
                 # 資金ランキング
                 c.execute("SELECT user_name, gold FROM players WHERE guild_id=? AND world_id=? ORDER BY gold DESC LIMIT 10", (guild_id, w_id))
                 gold_leaderboard = [{"name": "Secret Player", "gold": r[1]} for r in c.fetchall()]
                 
-                # 陣営(Camp)の勢力(領土数)を集計
+                # 陣営(Camp)の勢力(領土数)
                 c.execute("SELECT camp_name, founder_id FROM camps WHERE guild_id=? AND world_id=?", (guild_id, w_id))
                 camps = c.fetchall()
                 camp_shares = []
@@ -430,35 +426,35 @@ async def sync_supabase_task():
                     "gold_ranking": gold_leaderboard,
                     "camp_shares": camp_shares
                 }
-                
-                # マップ画像の生成とアップロード
-                try:
-                    file_obj, _ = _generate_current_map_sync(guild_id, w_id)
-                    if file_obj:
-                        file_bytes = file_obj.fp.read()
-                        def _upload_img():
-                            supabase_client.storage.from_("maps").upload(f"map_{guild_id}_{w_id}.png", file_bytes, file_options={"upsert": "true", "contentType": "image/png"})
-                        await asyncio.to_thread(_upload_img)
-                except Exception as img_err:
-                    logger.error(f"マップ画像アップロードエラー: {img_err}")
-                
-                # DBレコードの更新
-                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                def _upload_db():
-                    # id を guild_id + _ + world_id などの文字列にして一意にする
-                    record_id = f"{guild_id}_{w_id}"
-                    supabase_client.table("world_status").upsert({
-                        "id": record_id, 
-                        "world_id": w_id, 
-                        "updated_at": now_iso, 
-                        "data": data,
-                        "map_url": f"{SUPABASE_URL}/storage/v1/object/public/maps/map_{guild_id}_{w_id}.png"
-                    }).execute()
-                await asyncio.to_thread(_upload_db)
-                
-                # 負荷軽減のため少し待つ
-                await asyncio.sleep(1)
-                
+                worlds_payload.append((guild_id, w_id, data))
+
+        # 2. DBクローズ後に、画像生成とSupabaseアップロードを実行
+        for guild_id, w_id, data in worlds_payload:
+            try:
+                # マップ画像生成（別スレッド）
+                file_obj, _ = await asyncio.to_thread(_generate_current_map_sync, guild_id, w_id)
+                if file_obj:
+                    file_bytes = file_obj.fp.read()
+                    def _upload_img():
+                        supabase_client.storage.from_("maps").upload(f"map_{guild_id}_{w_id}.png", file_bytes, file_options={"upsert": "true", "contentType": "image/png"})
+                    await asyncio.to_thread(_upload_img)
+            except Exception as img_err:
+                logger.error(f"マップ画像アップロードエラー ({guild_id}_{w_id}): {img_err}")
+
+            # DBレコードの更新
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            def _upload_db():
+                record_id = f"{guild_id}_{w_id}"
+                supabase_client.table("world_status").upsert({
+                    "id": record_id, 
+                    "world_id": w_id, 
+                    "updated_at": now_iso, 
+                    "data": data,
+                    "map_url": f"{SUPABASE_URL}/storage/v1/object/public/maps/map_{guild_id}_{w_id}.png"
+                }).execute()
+            await asyncio.to_thread(_upload_db)
+            await asyncio.sleep(0.5)
+
     except Exception as e:
         logger.error(f"Supabase同期エラー: {e}")
 
