@@ -373,15 +373,20 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 
-@tasks.loop(minutes=5)  # 画像生成は重いので5分おきに変更
+@tasks.loop(minutes=1)
 async def sync_supabase_task():
-    if not supabase_client or not bot.is_ready(): return
+    if not supabase_client:
+        logger.warning("Supabase設定がありません。同期をスキップします。")
+        return
+    if not bot.is_ready():
+        return
     try:
+        logger.info("Supabase同期タスクを実行中...")
         with get_db_connection() as conn:
             c = conn.cursor()
-            # アクティブな(guild_id, world_id)の組み合わせを取得（領土が1つでもある世界）
             c.execute("SELECT DISTINCT guild_id, world_id FROM territories")
             active_worlds = c.fetchall()
+            logger.info(f"同期対象のワールド数: {len(active_worlds)}")
             
             for guild_id, w_id in active_worlds:
                 # 領土ランキング
