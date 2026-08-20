@@ -355,7 +355,8 @@ class WarBot(commands.Bot):
 
     async def setup_hook(self):
         init_db()
-        await self.load_extension("cogs.commands")  # ここでコマンド群を読み込み
+        await self.load_extension("cogs.commands")
+        await self.load_extension("cogs.admin")  # ここでコマンド群を読み込み
         await self.tree.sync()
         logger.info("スラッシュコマンドを同期しました。")
         if not scheduled_tasks.is_running(): 

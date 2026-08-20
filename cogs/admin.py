@@ -5,11 +5,8 @@ from main import (
     get_db_connection, safe_defer, is_slash_op_or_admin, ensure_world_context
 )
 
-class OpGroup(app_commands.Group):
-    def __init__(self):
-        super().__init__(name="op", description="サーバー管理者・OP権限保持者専用の設定コマンド")
-
-    @op_group.command(name="setup", description="初期設定を行います（戦争用カテゴリと3つの専用チャンネルを自動作成）")
+class AdminCog(commands.Cog):
+    @app_commands.command(name="op_setup", description="初期設定を行います（戦争用カテゴリと3つの専用チャンネルを自動作成）")
     @is_slash_op_or_admin()
     async def cmd_setup(self, interaction: discord.Interaction):
         await safe_defer(interaction)
@@ -140,4 +137,4 @@ class OpGroup(app_commands.Group):
         await interaction.followup.send(f"[設定] 通知設定を **{'ON' if mode.value==1 else 'OFF'}** に変更し、{notify_channel.mention} に設定しました。")
 
 async def setup(bot):
-    bot.tree.add_command(OpGroup())
+    await bot.add_cog(AdminCog(bot))
