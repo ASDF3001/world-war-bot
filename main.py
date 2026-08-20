@@ -162,7 +162,11 @@ def init_db():
     except Exception as e: logger.error(f"DB初期化エラー: {e}")
 
 async def safe_defer(interaction: discord.Interaction, ephemeral: bool = False):
-    if not interaction.response.is_done(): await interaction.response.defer(ephemeral=ephemeral)
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=ephemeral)
+    except (discord.NotFound, discord.HTTPException):
+        pass
 
 async def send_dm_fallback(member: discord.Member, channel: discord.TextChannel, content: str, view: discord.ui.View = None, embed: discord.Embed = None):
     try:
@@ -494,6 +498,9 @@ async def change_status_task():
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandInvokeError) and isinstance(error.original, (discord.NotFound, discord.errors.NotFound)):
+        logger.warning(f"コマンド ({interaction.command.name if interaction.command else 'unknown'}) が3秒以内に応答できずタイムアウトしました(10062)。")
+        return
     if isinstance(error, app_commands.CommandOnCooldown):
         minutes, seconds = divmod(int(error.retry_after), 60)
         msg = f"まだ準備中です。あと {minutes}分 {seconds}秒 お待ちください。"
