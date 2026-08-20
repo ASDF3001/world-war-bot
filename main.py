@@ -458,10 +458,8 @@ async def sync_supabase_task():
         logger.error(f"Supabase同期エラー: {e}")
 
 @bot.event
-async def on_interaction(interaction: discord.Interaction):
-    if interaction.type == discord.InteractionType.application_command:
-        bot.command_count += 1
-    await bot.process_application_commands(interaction)
+async def on_app_command_completion(interaction: discord.Interaction, command):
+    bot.command_count += 1
 
 @tasks.loop(seconds=10)
 async def change_status_task():
