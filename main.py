@@ -372,36 +372,45 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
-@tasks.loop(minutes=1)
+
+@tasks.loop(minutes=5)  # 画像生成は重いので5分おきに変更
 async def sync_supabase_task():
     if not supabase_client or not bot.is_ready(): return
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            for w_id in [1, 2, 3]:
+            # アクティブな(guild_id, world_id)の組み合わせを取得（領土が1つでもある世界）
+            c.execute("SELECT DISTINCT guild_id, world_id FROM territories")
+            active_worlds = c.fetchall()
+            
+            for guild_id, w_id in active_worlds:
                 # 領土ランキング
-                c.execute("SELECT owner_id, COUNT(*) as c FROM territories WHERE world_id=? GROUP BY owner_id ORDER BY c DESC LIMIT 10", (w_id,))
+                c.execute("SELECT owner_id, COUNT(*) as c FROM territories WHERE guild_id=? AND world_id=? GROUP BY owner_id ORDER BY c DESC LIMIT 10", (guild_id, w_id))
                 t_ranks = c.fetchall()
                 territory_leaderboard = []
                 for uid, count in t_ranks:
-                    c.execute("SELECT user_name, title, main_country FROM players WHERE user_id=? AND world_id=?", (uid, w_id))
+                    # 匿名性確保のため、プレイヤー名をハッシュ化するか、一部伏せ字にするなどの処理も可能だが、
+                    # まずはそのまま表示するか、「Player_XXX」にする。
+                    c.execute("SELECT user_name, title, main_country FROM players WHERE user_id=? AND guild_id=? AND world_id=?", (uid, guild_id, w_id))
                     p = c.fetchone()
-                    if p: territory_leaderboard.append({"name": p[0], "title": p[1], "country": p[2], "territories": count})
+                    if p:
+                        # 匿名モード: ユーザー名を出さずに国コードだけにするか、設定で分けるか
+                        territory_leaderboard.append({"name": "Secret Player", "title": p[1], "country": p[2], "territories": count})
                 
                 # 資金ランキング
-                c.execute("SELECT user_name, gold FROM players WHERE world_id=? ORDER BY gold DESC LIMIT 10", (w_id,))
-                gold_leaderboard = [{"name": r[0], "gold": r[1]} for r in c.fetchall()]
+                c.execute("SELECT user_name, gold FROM players WHERE guild_id=? AND world_id=? ORDER BY gold DESC LIMIT 10", (guild_id, w_id))
+                gold_leaderboard = [{"name": "Secret Player", "gold": r[1]} for r in c.fetchall()]
                 
                 # 陣営(Camp)の勢力(領土数)を集計
-                c.execute("SELECT camp_name, founder_id FROM camps WHERE world_id=?", (w_id,))
+                c.execute("SELECT camp_name, founder_id FROM camps WHERE guild_id=? AND world_id=?", (guild_id, w_id))
                 camps = c.fetchall()
                 camp_shares = []
                 for c_name, _ in camps:
-                    c.execute("SELECT user_id FROM camp_members WHERE camp_name=? AND world_id=?", (c_name, w_id))
+                    c.execute("SELECT user_id FROM camp_members WHERE camp_name=? AND guild_id=? AND world_id=?", (c_name, guild_id, w_id))
                     members = [m[0] for m in c.fetchall()]
                     if members:
                         placeholders = ','.join('?' * len(members))
-                        c.execute(f"SELECT COUNT(*) FROM territories WHERE world_id=? AND owner_id IN ({placeholders})", [w_id] + members)
+                        c.execute(f"SELECT COUNT(*) FROM territories WHERE guild_id=? AND world_id=? AND owner_id IN ({placeholders})", [guild_id, w_id] + members)
                         camp_territories = c.fetchone()[0]
                         camp_shares.append({"camp_name": c_name, "territories": camp_territories})
                 camp_shares.sort(key=lambda x: x["territories"], reverse=True)
@@ -412,10 +421,34 @@ async def sync_supabase_task():
                     "camp_shares": camp_shares
                 }
                 
+                # マップ画像の生成とアップロード
+                try:
+                    file_obj, _ = _generate_current_map_sync(guild_id, w_id)
+                    if file_obj:
+                        file_bytes = file_obj.fp.read()
+                        def _upload_img():
+                            supabase_client.storage.from_("maps").upload(f"map_{guild_id}_{w_id}.png", file_bytes, file_options={"upsert": "true", "contentType": "image/png"})
+                        await asyncio.to_thread(_upload_img)
+                except Exception as img_err:
+                    logger.error(f"マップ画像アップロードエラー: {img_err}")
+                
+                # DBレコードの更新
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                def _upload():
-                    supabase_client.table("world_status").upsert({"world_id": w_id, "updated_at": now_iso, "data": data}).execute()
-                await asyncio.to_thread(_upload)
+                def _upload_db():
+                    # id を guild_id + _ + world_id などの文字列にして一意にする
+                    record_id = f"{guild_id}_{w_id}"
+                    supabase_client.table("world_status").upsert({
+                        "id": record_id, 
+                        "world_id": w_id, 
+                        "updated_at": now_iso, 
+                        "data": data,
+                        "map_url": f"{SUPABASE_URL}/storage/v1/object/public/maps/map_{guild_id}_{w_id}.png"
+                    }).execute()
+                await asyncio.to_thread(_upload_db)
+                
+                # 負荷軽減のため少し待つ
+                await asyncio.sleep(1)
+                
     except Exception as e:
         logger.error(f"Supabase同期エラー: {e}")
 
