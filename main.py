@@ -15,7 +15,7 @@ import asyncio
 import logging
 import colorsys
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 
 # ==============================================================================
@@ -24,8 +24,7 @@ import google.generativeai as genai
 load_dotenv()
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 DB_FILE = os.getenv("DB_FILE", "war_game_worlds.db")
 BACKUP_DIR = os.getenv("BACKUP_DIR", "db_backups")
 PROMO_LINK = "https://discord.gg/dsGhNNJfzc"
@@ -284,10 +283,9 @@ def _generate_current_map_sync(guild_id: str, world_id: int):
 
 
 async def generate_and_send_news(guild, channel):
-    if not GEMINI_API_KEY: return
+    if not genai_client: return
     guild_id = str(guild.id)
     try:
-        model = genai.GenerativeModel('gemini-3.5-flash-lite')
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT world_id, event_text FROM world_logs WHERE guild_id=?", (guild_id,))
@@ -317,7 +315,11 @@ async def generate_and_send_news(guild, channel):
 - キャッチーな見出し（大見出し）を含めること
 - 記者の視点から、世界の戦況や外交の動きをドラマチックに要約すること
 """
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await asyncio.to_thread(
+                genai_client.models.generate_content,
+                model='gemini-3.5-flash-lite',
+                contents=prompt
+            )
             news_text = response.text.strip()
             
             embed = discord.Embed(title=f"📰 World Times - 世界 #{w_id} 最新情勢", description=news_text, color=0x3498db)

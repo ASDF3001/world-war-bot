@@ -926,3 +926,38 @@ async def run_propaganda(interaction: discord.Interaction, target: str):
             msg = f"❌ **[工作失敗]**\nプロパガンダは見破られ強制送還されました...\n工作資金 **{cost} Gold** を無駄にしました。"
         conn.commit()
     await interaction.followup.send(msg + get_promo_and_tip(), ephemeral=True)        
+# ==============================================================================
+# 不戦協定 (Peace Treaty)
+# ==============================================================================
+class PeaceTreatyView(discord.ui.View):
+    def __init__(self, guild_id: str, world_id: int, proposer_id: str, proposer_name: str, target_id: str):
+        super().__init__(timeout=86400)
+        self.guild_id = guild_id
+        self.world_id = world_id
+        self.proposer_id = proposer_id
+        self.proposer_name = proposer_name
+        self.target_id = target_id
+
+    @discord.ui.button(label="承認する", style=discord.ButtonStyle.success, emoji="🕊️")
+    async def btn_accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.target_id: return await interaction.response.send_message("あなたへの提案ではありません。", ephemeral=True)
+        await interaction.response.defer()
+        
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expires = (now + datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+        
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT OR REPLACE INTO peace_treaties (guild_id, world_id, user_a, user_b, expires_at) VALUES (?, ?, ?, ?, ?)", (self.guild_id, self.world_id, self.proposer_id, self.target_id, expires))
+            conn.commit()
+            
+        add_world_log(self.guild_id, self.world_id, f"{self.proposer_name} と {interaction.user.display_name} が24時間の不戦協定を締結しました。")
+        self.stop()
+        await interaction.message.edit(content=f"🕊️ **不戦協定締結**\n{self.proposer_name} と {interaction.user.display_name} は、向こう24時間の不戦協定を結びました！", view=None)
+
+    @discord.ui.button(label="拒否する", style=discord.ButtonStyle.danger)
+    async def btn_reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.target_id: return await interaction.response.send_message("あなたへの提案ではありません。", ephemeral=True)
+        await interaction.response.defer()
+        self.stop()
+        await interaction.message.edit(content=f"💥 **協定拒否**\n{interaction.user.display_name} は {self.proposer_name} の不戦協定提案を蹴り飛ばしました。", view=None)

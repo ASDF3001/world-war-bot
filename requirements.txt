@@ -4,4 +4,4 @@ pandas
 numpy
 Pillow
 supabase
-google-generativeai
+google-genai
