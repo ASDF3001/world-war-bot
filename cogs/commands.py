@@ -22,6 +22,10 @@ from cogs.ui_logic import (
 )
 
 class CommandsCog(commands.Cog):
+    un_group = app_commands.Group(name="un", description="国連(UN)に関するコマンド")
+    camp_group = app_commands.Group(name="camp", description="陣営(Camp)に関するコマンド")
+    trophy_group = app_commands.Group(name="trophy", description="称号・トロフィーに関するコマンド")
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -358,8 +362,8 @@ class CommandsCog(commands.Cog):
         if current_text: embed.add_field(name="\u200b", value=current_text, inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="invite_un", description="指定したプレイヤーを国連(UN)に招待します")
-    async def cmd_invite_un(self, interaction: discord.Interaction, target: discord.Member):
+    @un_group.command(name="invite", description="指定したプレイヤーを国連(UN)に招待します")
+    async def cmd_un_invite(self, interaction: discord.Interaction, target: discord.Member):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -370,8 +374,8 @@ class CommandsCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了 / 世界#{world_id}] <@{target.id}> を国連に招待しました。")
 
-    @app_commands.command(name="join_un", description="国連への招待を承諾して加入します")
-    async def cmd_join_un(self, interaction: discord.Interaction):
+    @un_group.command(name="join", description="国連への招待を承諾して加入します")
+    async def cmd_un_join(self, interaction: discord.Interaction):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -385,8 +389,8 @@ class CommandsCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了 / 世界#{world_id}] <@{user_id}> が国連に加入しました。")
 
-    @app_commands.command(name="leave_un", description="国連から脱退します")
-    async def cmd_leave_un(self, interaction: discord.Interaction):
+    @un_group.command(name="leave", description="国連から脱退します")
+    async def cmd_un_leave(self, interaction: discord.Interaction):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -399,12 +403,12 @@ class CommandsCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了] <@{user_id}> が国連から脱退しました。")
 
-    @app_commands.command(name="un_list", description="現在の国連(UN)加盟国一覧を確認します")
-    async def cmd_un_list(self, interaction: discord.Interaction):
+    @un_group.command(name="list", description="現在の国連(UN)加盟国一覧を確認します")
+    async def cmd_un_list_group(self, interaction: discord.Interaction):
         await run_un_list(interaction)
 
-    @app_commands.command(name="create_camp", description="新しい陣営を設立します")
-    async def cmd_create_camp(self, interaction: discord.Interaction, camp_name: str):
+    @camp_group.command(name="create", description="新しい陣営を設立します")
+    async def cmd_camp_create(self, interaction: discord.Interaction, camp_name: str):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -418,8 +422,8 @@ class CommandsCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了] 新たな陣営 **【{camp_name}】** が設立されました！")
 
-    @app_commands.command(name="invite_camp", description="指定したプレイヤーを陣営に招待します")
-    async def cmd_invite_camp(self, interaction: discord.Interaction, target: discord.Member, camp_name: str):
+    @camp_group.command(name="invite", description="指定したプレイヤーを陣営に招待します")
+    async def cmd_camp_invite(self, interaction: discord.Interaction, target: discord.Member, camp_name: str):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -432,8 +436,8 @@ class CommandsCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了] <@{target.id}> を陣営 **【{camp_name}】** に招待しました。")
 
-    @app_commands.command(name="join_camp", description="招待された陣営に加入します")
-    async def cmd_join_camp(self, interaction: discord.Interaction, camp_name: str):
+    @camp_group.command(name="join", description="招待された陣営に加入します")
+    async def cmd_camp_join(self, interaction: discord.Interaction, camp_name: str):
         await safe_defer(interaction)
         world_id = await ensure_world_context(interaction)
         if world_id == 0: return
@@ -451,8 +455,8 @@ class CommandsCog(commands.Cog):
     async def cmd_invite(self, interaction: discord.Interaction, target: discord.Member, camp_name: str):
         await self.cmd_invite_camp.callback(self, interaction, target, camp_name)
 
-    @app_commands.command(name="camp_list", description="現在の陣営一覧を確認します")
-    async def cmd_camp_list(self, interaction: discord.Interaction):
+    @camp_group.command(name="list", description="現在の陣営一覧を確認します")
+    async def cmd_camp_list_group(self, interaction: discord.Interaction):
         await run_camp_list(interaction)
 
     @app_commands.command(name="join", description="公式サポートサーバーへの参加リンクを表示します")
@@ -475,9 +479,10 @@ class CommandsCog(commands.Cog):
         await safe_defer(interaction, ephemeral=True)
         embed = discord.Embed(title="全コマンド一覧 (カテゴリー別)", color=0x3498db)
         embed.add_field(name="運営・設定 (管理者用)", value="`/op setup` : 初期設定\n`/op reset` : リセット\n※全て `/op` から実行可能", inline=False)
-        embed.add_field(name="メインゲーム・侵略", value="`/attack` : 攻撃\n`/targets` : ターゲット確認\n`/gui` : 外交パネル", inline=False)
+        embed.add_field(name="メインゲーム・侵略", value="`/attack` : 攻撃\n`/targets` : ターゲット確認\n`/gui` : 外交パネル\n`/peace` : 不戦協定", inline=False)
         embed.add_field(name="内政・機能管理", value="`/defend` : 防衛費投資\n`/withdraw` : 資金還元\n`/reallocate` : 防衛力移動\n`/user_setting` : 確認ダイアログ等設定", inline=False)
         embed.add_field(name="経済・貿易・情報", value="`/work` : 労働\n`/war_bonds` : 戦債発行\n`/status` : ステータス確認\n`/import_oil` : オイル購入\n`/convert_resource` : システム交換", inline=False)
+        embed.add_field(name="陣営・国連・称号", value="`/un list` 等 : 国連関連\n`/camp list` 等 : 陣営関連\n`/trophy show` 等 : 称号関連", inline=False)
         await interaction.followup.send(embed=embed, view=CommandGUIView(), ephemeral=True)
     @app_commands.command(name="version", description="閲覧可能なアップデートのバージョン一覧を最新から10件表示します")
     async def cmd_version(self, interaction: discord.Interaction):
@@ -764,7 +769,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed)
 
 
-    @app_commands.command(name="trophy", description="獲得した実績や称号を確認し、装備します")
+    @trophy_group.command(name="show", description="獲得した実績や称号を確認し、装備します")
     async def cmd_trophy(self, interaction: discord.Interaction):
         await safe_defer(interaction, ephemeral=True)
         world_id = await ensure_world_context(interaction)
@@ -794,7 +799,7 @@ class CommandsCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="trophy_equip", description="取得済みの称号を装備します")
+    @trophy_group.command(name="equip", description="取得済みの称号を装備します")
     async def cmd_trophy_equip(self, interaction: discord.Interaction, title_name: str):
         await safe_defer(interaction, ephemeral=True)
         world_id = await ensure_world_context(interaction)

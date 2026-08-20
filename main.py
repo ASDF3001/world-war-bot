@@ -337,6 +337,9 @@ async def generate_and_send_news(guild, channel):
     except Exception as e:
         logger.error(f"新聞生成エラー: {e}")
 
+import math
+from discord.ext import tasks
+
 # ==============================================================================
 # Botクラスの定義とバックグラウンドタスク
 # ==============================================================================
@@ -347,6 +350,8 @@ class WarBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents, help_command=None)
+        self.command_count = 0
+        self.status_index = 0
 
     async def setup_hook(self):
         init_db()
@@ -355,8 +360,46 @@ class WarBot(commands.Bot):
         logger.info("スラッシュコマンドを同期しました。")
         if not scheduled_tasks.is_running(): 
             scheduled_tasks.start()
+        if not change_status_task.is_running():
+            change_status_task.start()
 
 bot = WarBot()
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.application_command:
+        bot.command_count += 1
+    await bot.process_application_commands(interaction)
+
+@tasks.loop(seconds=3)
+async def change_status_task():
+    try:
+        if not bot.is_ready(): return
+        statuses = []
+        
+        # 1. 〇〇人|〇〇鯖
+        total_members = sum(g.member_count for g in bot.guilds if g.member_count)
+        total_guilds = len(bot.guilds)
+        statuses.append(discord.Activity(type=discord.ActivityType.watching, name=f"{total_members}人 | {total_guilds}鯖"))
+        
+        # 2. Ping 〇〇ms
+        ping = bot.latency * 1000
+        if math.isinf(ping) or math.isnan(ping) or ping < 0 or ping > 10000:
+            ping_str = "Error ms"
+        else:
+            ping_str = f"{int(ping)}ms"
+        statuses.append(discord.Activity(type=discord.ActivityType.watching, name=f"Ping {ping_str}"))
+        
+        # 3. Powered by rds9
+        statuses.append(discord.Activity(type=discord.ActivityType.watching, name="Powered by rds9"))
+        
+        # 4. 〇〇回のコマンド
+        statuses.append(discord.Activity(type=discord.ActivityType.watching, name=f"{bot.command_count}回のコマンド"))
+        
+        bot.status_index = (bot.status_index + 1) % len(statuses)
+        await bot.change_presence(activity=statuses[bot.status_index])
+    except Exception as e:
+        logger.error(f"ステータス更新エラー: {e}")
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
