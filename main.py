@@ -296,8 +296,8 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 async def scheduled_tasks():
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     today_str = now_utc.strftime('%Y-%m-%d')
+    reset_guilds = []
     if now_utc.hour == 19:
-        reset_guilds = []
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT guild_id, reset_interval, last_reset_date FROM server_channels")
