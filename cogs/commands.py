@@ -10,14 +10,15 @@ import sqlite3
 from main import (
     get_db_connection, safe_defer, send_dm_fallback, ensure_world_context,
     get_promo_and_tip, get_paypay_link, resolve_country_code, check_and_create_user,
-    COUNTRY_MAP, is_oil_enabled, BASE_INCOME, TERRITORY_YIELD, _generate_current_map_sync
+    COUNTRY_MAP, is_oil_enabled, BASE_INCOME, TERRITORY_YIELD, _generate_current_map_sync,
+    add_world_log, add_trophy
 )
 
 from cogs.ui_logic import (
     work_cooldowns, OilImportView, CommandGUIView, HelpView, AttackTargetModal,
     DefendView, execute_defend_logic, run_status, run_diplomacy, run_targets,
     run_country_management, run_country_status, run_attack, run_un_list, run_camp_list,
-    my_countries_autocomplete, run_version, run_update, StatsView
+    my_countries_autocomplete, run_version, run_update, StatsView, PeaceTreatyView
 )
 
 class CommandsCog(commands.Cog):
@@ -651,6 +652,8 @@ class CommandsCog(commands.Cog):
                 c.execute("SELECT user_name, gold, oil FROM players WHERE guild_id=? AND world_id=? AND user_id=?", (guild_id, world_id, t_owner))
                 enemy = c.fetchone()
                 msg = f"🕵️ **[潜入成功]**\n**{target_code}** へのスパイ潜入に成功しました！\n\n**【極秘・国家機密データ】**\n・統治者: **{enemy[0]}**\n・現在防衛力: **{t_defense}** 人\n・国家資金: **{enemy[1]}** Gold\n・石油備蓄: **{enemy[2]}** L\n・潜入成功率: {success_rate}%"
+                add_world_log(guild_id, world_id, f"何者かのスパイが {target_code} に潜入したという噂が流れています。")
+                add_trophy(guild_id, world_id, user_id, "凄腕の諜報員")
             else:
                 msg = f"💥 **[潜入失敗]**\n**{target_code}** の防衛網に引っかかり、スパイは捕らえられました...\n工作資金 **{cost} Gold** を失いました。(成功率: {success_rate}%)"
             
@@ -787,9 +790,41 @@ class CommandsCog(commands.Cog):
         embed.add_field(name="戦績", value=f"⚔️ 勝利: {wins} / 敗北: {losses}\n📊 勝率: {win_rate:.1f}%", inline=True)
         embed.add_field(name="獲得トロフィー", value=f"🏆 {trophy_count if trophy_count else 0} 個", inline=True)
         
-        embed.set_footer(text="※称号を変更する装備UIは、今後の拡張アップデートで実装予定です！")
+        embed.set_footer(text="※称号は /trophy_equip で変更できます。")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="trophy_equip", description="取得済みの称号を装備します")
+    async def cmd_trophy_equip(self, interaction: discord.Interaction, title_name: str):
+        await safe_defer(interaction, ephemeral=True)
+        world_id = await ensure_world_context(interaction)
+        if world_id == 0: return
+        guild_id, user_id = str(interaction.guild_id), str(interaction.user.id)
+        
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT 1 FROM unlocked_trophies WHERE guild_id=? AND world_id=? AND user_id=? AND trophy_id=?", (guild_id, world_id, user_id, title_name))
+            if not c.fetchone() and title_name != "未設定":
+                return await interaction.followup.send(f"[エラー] 称号「{title_name}」はまだ獲得していません。", ephemeral=True)
+            
+            c.execute("UPDATE players SET title=? WHERE guild_id=? AND world_id=? AND user_id=?", (title_name, guild_id, world_id, user_id))
+            conn.commit()
+            
+        await interaction.followup.send(f"🎖️ **称号変更**\n称号を **【 {title_name} 】** に変更しました！", ephemeral=True)
+
+    @app_commands.command(name="peace", description="指定したプレイヤーに24時間の不戦協定を提案します")
+    async def cmd_peace(self, interaction: discord.Interaction, target_user: discord.Member):
+        await safe_defer(interaction)
+        world_id = await ensure_world_context(interaction)
+        if world_id == 0: return
+        guild_id, user_id = str(interaction.guild_id), str(interaction.user.id)
+        
+        if user_id == str(target_user.id):
+            return await interaction.followup.send("[エラー] 自分自身とは協定を結べません。", ephemeral=True)
+            
+        view = PeaceTreatyView(guild_id, world_id, user_id, interaction.user.display_name, str(target_user.id))
+        msg = f"🕊️ **不戦協定の提案**\n{interaction.user.mention} が {target_user.mention} に対して、向こう24時間の不戦協定（Peace Treaty）を提案しました。\n\n{target_user.display_name}さん、承認しますか？"
+        await interaction.followup.send(content=msg, view=view)
 
 async def setup(bot):
     await bot.add_cog(CommandsCog(bot))

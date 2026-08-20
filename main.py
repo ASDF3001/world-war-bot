@@ -15,6 +15,7 @@ import asyncio
 import logging
 import colorsys
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 
 # ==============================================================================
@@ -22,6 +23,9 @@ from dotenv import load_dotenv
 # ==============================================================================
 load_dotenv()
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 DB_FILE = os.getenv("DB_FILE", "war_game_worlds.db")
 BACKUP_DIR = os.getenv("BACKUP_DIR", "db_backups")
 PROMO_LINK = "https://discord.gg/dsGhNNJfzc"
@@ -133,6 +137,9 @@ def init_db():
             c.execute('''CREATE TABLE IF NOT EXISTS camp_members (guild_id TEXT, world_id INTEGER, user_id TEXT, camp_name TEXT, PRIMARY KEY(guild_id, world_id, user_id))''')
             c.execute('''CREATE TABLE IF NOT EXISTS camp_invites (guild_id TEXT, world_id INTEGER, user_id TEXT, camp_name TEXT, PRIMARY KEY(guild_id, world_id, user_id, camp_name))''')
             c.execute('''CREATE TABLE IF NOT EXISTS server_ops (guild_id TEXT, user_id TEXT, PRIMARY KEY(guild_id, user_id))''')
+            c.execute('''CREATE TABLE IF NOT EXISTS world_logs (guild_id TEXT, world_id INTEGER, timestamp TEXT, event_text TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS unlocked_trophies (guild_id TEXT, world_id INTEGER, user_id TEXT, trophy_id TEXT, PRIMARY KEY(guild_id, world_id, user_id, trophy_id))''')
+            c.execute('''CREATE TABLE IF NOT EXISTS peace_treaties (guild_id TEXT, world_id INTEGER, user_a TEXT, user_b TEXT, expires_at TEXT, PRIMARY KEY(guild_id, world_id, user_a, user_b))''')
 
             def add_column(table, column, data_type):
                 c.execute(f"PRAGMA table_info({table})")
@@ -220,6 +227,34 @@ def is_at_war(guild_id: str, world_id: int, attacker: str, defender: str) -> boo
         c.execute("SELECT 1 FROM wars WHERE guild_id=? AND world_id=? AND attacker_id=? AND defender_id=?", (guild_id, world_id, attacker, defender))
         return c.fetchone() is not None
 
+def is_peace_treaty_active(guild_id: str, world_id: int, user_a: str, user_b: str) -> bool:
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("SELECT 1 FROM peace_treaties WHERE guild_id=? AND world_id=? AND ((user_a=? AND user_b=?) OR (user_a=? AND user_b=?)) AND expires_at > ?", (guild_id, world_id, user_a, user_b, user_b, user_a, now_str))
+        return c.fetchone() is not None
+
+def add_world_log(guild_id: str, world_id: int, text: str):
+    now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO world_logs (guild_id, world_id, timestamp, event_text) VALUES (?, ?, ?, ?)", (guild_id, world_id, now_str, text))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"世界ログ記録エラー: {e}")
+
+def add_trophy(guild_id: str, world_id: int, user_id: str, trophy_id: str):
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO unlocked_trophies (guild_id, world_id, user_id, trophy_id) VALUES (?, ?, ?, ?)", (guild_id, world_id, user_id, trophy_id))
+            if c.rowcount > 0:
+                c.execute("UPDATE players SET trophy_count = trophy_count + 1 WHERE guild_id=? AND world_id=? AND user_id=?", (guild_id, world_id, user_id))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"実績追加エラー: {e}")
+
 def check_and_create_user(cursor, guild_id, world_id, user_id, user_name):
     cursor.execute("SELECT gold FROM players WHERE guild_id = ? AND world_id = ? AND user_id = ?", (guild_id, world_id, user_id))
     if not cursor.fetchone():
@@ -247,6 +282,49 @@ def _generate_current_map_sync(guild_id: str, world_id: int):
         logger.error(f"マップ生成エラー: \n{traceback.format_exc()}")
         return None, []
 
+
+async def generate_and_send_news(guild, channel):
+    if not GEMINI_API_KEY: return
+    guild_id = str(guild.id)
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash-8b')
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT world_id, event_text FROM world_logs WHERE guild_id=?", (guild_id,))
+            logs = c.fetchall()
+            
+            if not logs: return
+            
+            world_events = {}
+            for w_id, text in logs:
+                if w_id not in world_events: world_events[w_id] = []
+                world_events[w_id].append(text)
+            
+            c.execute("DELETE FROM world_logs WHERE guild_id=?", (guild_id,))
+            conn.commit()
+
+        for w_id, events in world_events.items():
+            if not events: continue
+            events_str = "\n".join(events[:50])
+            prompt = f"""
+あなたは「World War Bot」の世界情勢を報道する、架空のデイリー新聞「World Times」の凄腕AI記者です。
+以下の直近の出来事ログを元に、面白くて臨場感のある新聞記事テキスト（マークダウン形式、最大400文字程度）を作成してください。
+
+【出来事ログ（世界#{w_id}）】
+{events_str}
+
+【出力要件】
+- キャッチーな見出し（大見出し）を含めること
+- 記者の視点から、世界の戦況や外交の動きをドラマチックに要約すること
+"""
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            news_text = response.text.strip()
+            
+            embed = discord.Embed(title=f"📰 World Times - 世界 #{w_id} 最新情勢", description=news_text, color=0x3498db)
+            embed.set_footer(text="AI Reporter")
+            await channel.send(embed=embed)
+    except Exception as e:
+        logger.error(f"新聞生成エラー: {e}")
 
 # ==============================================================================
 # Botクラスの定義とバックグラウンドタスク
@@ -308,7 +386,7 @@ async def scheduled_tasks():
                         if (now_utc - last_date).days >= interval: reset_guilds.append(g_id)
                     except: reset_guilds.append(g_id)
             for g_id in reset_guilds:
-                for table in ['players', 'territories', 'alliances', 'wars', 'un_members', 'un_invites', 'camps', 'camp_members', 'camp_invites']: 
+                for table in ['players', 'territories', 'alliances', 'wars', 'un_members', 'un_invites', 'camps', 'camp_members', 'camp_invites', 'world_logs', 'unlocked_trophies', 'peace_treaties']: 
                     c.execute(f"DELETE FROM {table} WHERE guild_id=?", (g_id,))
                 c.execute("UPDATE server_channels SET last_reset_date=? WHERE guild_id=?", (today_str, g_id))
             conn.commit()
@@ -364,7 +442,9 @@ async def scheduled_tasks():
             if row and row[1] == 1 and row[0]:
                 channel = guild.get_channel(int(row[0]))
                 if channel:
-                    try: await channel.send("[定時給付] 基本給与・税収・配給石油が振り込まれました。(※戦債がある場合は一部天引きされます)")
+                    try: 
+                        await channel.send("[定時給付] 基本給与・税収・配給石油が振り込まれました。(※戦債がある場合は一部天引きされます)")
+                        await generate_and_send_news(guild, channel)
                     except: pass
     except Exception as e: logger.error(f"定時給付エラー: {e}")
 

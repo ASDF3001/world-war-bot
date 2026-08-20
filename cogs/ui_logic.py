@@ -9,7 +9,8 @@ from main import (
     get_db_connection, safe_defer, send_dm_fallback, ensure_world_context, 
     is_oil_enabled, resolve_country_code, is_allied, is_at_war, 
     check_and_create_user, _generate_current_map_sync, get_promo_and_tip, 
-    VALID_CODES, ADJACENCY_GRAPH, DEFAULT_DEFENSE, BASE_INCOME, TERRITORY_YIELD
+    VALID_CODES, ADJACENCY_GRAPH, DEFAULT_DEFENSE, BASE_INCOME, TERRITORY_YIELD,
+    add_world_log, add_trophy, is_peace_treaty_active
 )
 
 work_cooldowns = {}
@@ -471,6 +472,7 @@ async def execute_attack_logic(interaction: discord.Interaction, target_code: st
         defender_id, base_def = (def_row[0], def_row[1]) if def_row else (None, DEFAULT_DEFENSE)
 
         if defender_id and is_allied(guild_id, world_id, user_id, defender_id): return await interaction.followup.send("[エラー] 同盟国の領土は攻撃できません！", ephemeral=True)
+        if defender_id and is_peace_treaty_active(guild_id, world_id, user_id, defender_id): return await interaction.followup.send("[エラー] このプレイヤーとは不戦協定(Peace Treaty)を結んでいます！期間中は攻撃できません。", ephemeral=True)
 
         war_status_text, defense_power, base_cost_multiplier = "正規の戦争", base_def, 1.0
         if defender_id and not is_at_war(guild_id, world_id, user_id, defender_id):
@@ -500,12 +502,15 @@ async def execute_attack_logic(interaction: discord.Interaction, target_code: st
             c.execute("INSERT OR REPLACE INTO territories (guild_id, world_id, iso_alpha, owner_id, defense) VALUES (?, ?, ?, ?, ?)", (guild_id, world_id, target_code, user_id, surviving_troops))
             embed.color = 0x2ecc71
             embed.description = f"**作戦成功！ {user_name} が {target_code} を制圧しました！**\n\n作戦タイプ: {war_status_text}{distance_text}\n消費資金: **{total_cost}** Gold\n実質攻撃力: **{actual_power}** (ペナルティ適用後)\n残存配置兵力: {surviving_troops}人"
+            add_world_log(guild_id, world_id, f"{user_name} が {target_code} への侵攻作戦に成功し、制圧しました。")
+            add_trophy(guild_id, world_id, user_id, "新進気鋭の征服者")
         else:
             new_defense = max(10, base_def - int(atk_roll * random.uniform(0.4, 0.8)))
             c.execute("UPDATE players SET gold=?, oil=? WHERE guild_id=? AND world_id=? AND user_id=?", (current_gold - total_cost, current_oil - oil_cost, guild_id, world_id, user_id))
             if defender_id: c.execute("UPDATE territories SET defense=? WHERE guild_id=? AND world_id=? AND iso_alpha=?", (new_defense, guild_id, world_id, target_code))
             embed.color = 0xe74c3c
             embed.description = f"**作戦失敗... 防衛に阻まれ全滅しました。**\n\n作戦タイプ: {war_status_text}{distance_text}\n損失資金: **{total_cost}** Gold\n実質攻撃力: **{actual_power}**"
+            add_world_log(guild_id, world_id, f"{user_name} の {target_code} への侵攻作戦は防衛軍に阻まれ失敗しました。")
         conn.commit()
 
     if defender_id:
