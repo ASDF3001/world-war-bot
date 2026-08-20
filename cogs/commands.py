@@ -766,7 +766,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed)
 
 
-    @trophy_group.command(name="show", description="獲得した実績や称号を確認し、装備します")
+    @app_commands.command(name="trophy_show", description="獲得した実績や称号を確認し、装備します")
     async def cmd_trophy(self, interaction: discord.Interaction):
         await safe_defer(interaction, ephemeral=True)
         world_id = await ensure_world_context(interaction)

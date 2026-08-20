@@ -38,7 +38,7 @@ class AdminCog(commands.Cog):
         
         await interaction.followup.send(embed=embed)
 
-    @op_group.command(name="adj", description="隣接遠征ペナルティ(未隣接時コストアップ)のON/OFF切替")
+    @app_commands.command(name="op_adj", description="隣接遠征ペナルティ(未隣接時コストアップ)のON/OFF切替")
     @is_slash_op_or_admin()
     async def cmd_adj(self, interaction: discord.Interaction):
         await safe_defer(interaction)
@@ -53,7 +53,7 @@ class AdminCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[設定] 隣接遠征ペナルティを **{'ON (有効)' if new_val==1 else 'OFF (無効)'}** に変更しました。")
 
-    @op_group.command(name="reset_interval", description="自動リセット間隔の個別変更 (0で無効化)")
+    @app_commands.command(name="op_reset_interval", description="自動リセット間隔の個別変更 (0で無効化)")
     @is_slash_op_or_admin()
     async def cmd_reset_interval(self, interaction: discord.Interaction, days: int):
         await safe_defer(interaction)
@@ -65,7 +65,7 @@ class AdminCog(commands.Cog):
         msg = f"[設定] サーバーの自動リセットを **{days}日ごと** に設定しました。" if days > 0 else "[設定] サーバーの自動リセットを **OFF (手動のみ)** に設定しました。"
         await interaction.followup.send(msg)
 
-    @op_group.command(name="reset", description="現在のアクティブな世界の全データを即時リセットします")
+    @app_commands.command(name="op_reset", description="現在のアクティブな世界の全データを即時リセットします")
     @is_slash_op_or_admin()
     async def cmd_reset(self, interaction: discord.Interaction):
         await safe_defer(interaction)
@@ -78,7 +78,7 @@ class AdminCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(f"[完了] [世界#{world_id}] の全データを手動リセットしました。新たな歴史の始まりです。")
 
-    @op_group.command(name="op_setting", description="指定ユーザーにOP権限を付与または剥奪します")
+    @app_commands.command(name="op_op_setting", description="指定ユーザーにOP権限を付与または剥奪します")
     @app_commands.choices(mode=[app_commands.Choice(name="権限付与(ON)", value=1), app_commands.Choice(name="権限剥奪(OFF)", value=0)])
     @is_slash_op_or_admin()
     async def cmd_op_setting(self, interaction: discord.Interaction, target: discord.Member, mode: app_commands.Choice[int]):
@@ -95,7 +95,7 @@ class AdminCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(msg)
 
-    @op_group.command(name="oil_setting", description="石油消費システムの切替を行います")
+    @app_commands.command(name="op_oil_setting", description="石油消費システムの切替を行います")
     @app_commands.choices(world=[app_commands.Choice(name="全サーバー(0)", value=0), app_commands.Choice(name="世界 #1", value=1), app_commands.Choice(name="世界 #2", value=2), app_commands.Choice(name="世界 #3", value=3)])
     @app_commands.choices(mode=[app_commands.Choice(name="有効(ON)", value=1), app_commands.Choice(name="無効(OFF)", value=0)])
     @is_slash_op_or_admin()
@@ -114,7 +114,7 @@ class AdminCog(commands.Cog):
             conn.commit()
         await interaction.followup.send(msg)
 
-    @op_group.command(name="channel_setting", description="既存のチャンネルを各Worldに手動紐付けします")
+    @app_commands.command(name="op_channel_setting", description="既存のチャンネルを各Worldに手動紐付けします")
     @is_slash_op_or_admin()
     async def cmd_channel_setting(self, interaction: discord.Interaction, world1: discord.TextChannel, world2: discord.TextChannel, world3: discord.TextChannel):
         await safe_defer(interaction)
@@ -124,7 +124,7 @@ class AdminCog(commands.Cog):
             conn.commit()
         await interaction.followup.send("[完了] 各Worldの専用チャンネルを手動で設定しました。")
 
-    @op_group.command(name="reboot_setting", description="定時給付やワイプの通知先チャンネルとON/OFFを設定します")
+    @app_commands.command(name="op_reboot_setting", description="定時給付やワイプの通知先チャンネルとON/OFFを設定します")
     @app_commands.choices(mode=[app_commands.Choice(name="有効(ON)", value=1), app_commands.Choice(name="無効(OFF)", value=0)])
     @is_slash_op_or_admin()
     async def cmd_reboot_setting(self, interaction: discord.Interaction, notify_channel: discord.TextChannel, mode: app_commands.Choice[int]):
