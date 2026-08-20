@@ -4,4 +4,3 @@ pandas
 numpy
 Pillow
 supabase
-google-genai

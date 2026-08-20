@@ -15,8 +15,7 @@ import asyncio
 import logging
 import colorsys
 from dotenv import load_dotenv
-from google import genai
-
+import aiohttp
 
 # ==============================================================================
 # 初期設定と環境変数
@@ -24,7 +23,7 @@ from google import genai
 load_dotenv()
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
 DB_FILE = os.getenv("DB_FILE", "war_game_worlds.db")
 BACKUP_DIR = os.getenv("BACKUP_DIR", "db_backups")
 PROMO_LINK = "https://discord.gg/dsGhNNJfzc"
@@ -283,7 +282,7 @@ def _generate_current_map_sync(guild_id: str, world_id: int):
 
 
 async def generate_and_send_news(guild, channel):
-    if not genai_client: return
+    if not GEMINI_API_KEY: return
     guild_id = str(guild.id)
     try:
         with get_db_connection() as conn:
@@ -315,12 +314,22 @@ async def generate_and_send_news(guild, channel):
 - キャッチーな見出し（大見出し）を含めること
 - 記者の視点から、世界の戦況や外交の動きをドラマチックに要約すること
 """
-            response = await asyncio.to_thread(
-                genai_client.models.generate_content,
-                model='gemini-3.5-flash-lite',
-                contents=prompt
-            )
-            news_text = response.text.strip()
+            url = f"{GEMINI_BASE_URL}/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            headers = {"Content-Type": "application/json"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        try:
+                            news_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        except (KeyError, IndexError):
+                            news_text = "特派員からの通信が途絶えました。(生成エラー)"
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Gemini APIエラー: {resp.status} - {error_text}")
+                        continue
             
             embed = discord.Embed(title=f"📰 World Times - 世界 #{w_id} 最新情勢", description=news_text, color=0x3498db)
             embed.set_footer(text="AI Reporter")
