@@ -371,7 +371,7 @@ async def on_interaction(interaction: discord.Interaction):
         bot.command_count += 1
     await bot.process_application_commands(interaction)
 
-@tasks.loop(seconds=3)
+@tasks.loop(seconds=10)
 async def change_status_task():
     try:
         if not bot.is_ready(): return
