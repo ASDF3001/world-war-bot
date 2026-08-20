@@ -23,49 +23,6 @@ Discord上で遊べるリアルタイム領土争奪・世界征服シミュレ�
 
 ---
 
-## 🛠️ 動作環境 & 必要なパッケージ
-
-- **Python**: 3.10 以上 推奨
-
-### 依存ライブラリ (`requirements.txt`)
-- `discord.py`
-- `python-dotenv`
-- `pandas`
-- `numpy`
-- `Pillow`
-- `supabase`
-
----
-
-## 🚀 セットアップ手順
-
-### 1. リポジトリのクローン
-```bash
-git clone https://github.com/ASDF3001/world-war-bot.git
-cd world-war-bot
-```
-
-### 2. 依存パッケージのインストール
-```bash
-pip install -r requirements.txt
-```
-
-### 3. 環境変数の設定 (`.env`)
-プロジェクトルートに `.env` ファイルを作成し、以下の環境変数を設定してください。
-
-```env
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
-DB_FILE=war_game_worlds.db
-BACKUP_DIR=db_backups
-```
-
-### 4. Botの起動
-```bash
-python main.py
-```
-
----
-
 ## 🎮 主なコマンド
 
 | コマンド | 説明 |
@@ -83,9 +40,11 @@ python main.py
 
 ---
 
-## 📜 ライセンス
+## 📜 ライセンス・利用規約
 
-本プロジェクトは独自のライセンス（Proprietary License）のもとで公開されています。  
-詳細は [LICENCE](LICENCE) ファイルをご確認ください。
+本プロジェクトのソースコードおよび関連ファイルは、独自のライセンス（All Rights Reserved / Proprietary License）のもとで公開されています。
 
-> **無断複製、改変、再配布、転載、および自身のサーバー等での実行・運用・公衆送信を禁止します。**
+> ⚠️ **注意事項**  
+> 著作権者の書面による事前の許可なく、本ソフトウェアの全部または一部を**複製、改変、再配布、転載、または自身のサーバー等で実行・運用・公衆送信することを固く禁止します。**
+
+詳細については [LICENCE](LICENCE) ファイルをご確認ください。
