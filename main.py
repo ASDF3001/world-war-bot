@@ -287,7 +287,7 @@ async def generate_and_send_news(guild, channel):
     if not GEMINI_API_KEY: return
     guild_id = str(guild.id)
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-8b')
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT world_id, event_text FROM world_logs WHERE guild_id=?", (guild_id,))
