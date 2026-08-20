@@ -362,8 +362,62 @@ class WarBot(commands.Bot):
             scheduled_tasks.start()
         if not change_status_task.is_running():
             change_status_task.start()
+        if not sync_supabase_task.is_running():
+            sync_supabase_task.start()
 
 bot = WarBot()
+
+from supabase import create_client, Client
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+@tasks.loop(minutes=1)
+async def sync_supabase_task():
+    if not supabase_client or not bot.is_ready(): return
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            for w_id in [1, 2, 3]:
+                # 領土ランキング
+                c.execute("SELECT owner_id, COUNT(*) as c FROM territories WHERE world_id=? GROUP BY owner_id ORDER BY c DESC LIMIT 10", (w_id,))
+                t_ranks = c.fetchall()
+                territory_leaderboard = []
+                for uid, count in t_ranks:
+                    c.execute("SELECT user_name, title, main_country FROM players WHERE user_id=? AND world_id=?", (uid, w_id))
+                    p = c.fetchone()
+                    if p: territory_leaderboard.append({"name": p[0], "title": p[1], "country": p[2], "territories": count})
+                
+                # 資金ランキング
+                c.execute("SELECT user_name, gold FROM players WHERE world_id=? ORDER BY gold DESC LIMIT 10", (w_id,))
+                gold_leaderboard = [{"name": r[0], "gold": r[1]} for r in c.fetchall()]
+                
+                # 陣営(Camp)の勢力(領土数)を集計
+                c.execute("SELECT camp_name, founder_id FROM camps WHERE world_id=?", (w_id,))
+                camps = c.fetchall()
+                camp_shares = []
+                for c_name, _ in camps:
+                    c.execute("SELECT user_id FROM camp_members WHERE camp_name=? AND world_id=?", (c_name, w_id))
+                    members = [m[0] for m in c.fetchall()]
+                    if members:
+                        placeholders = ','.join('?' * len(members))
+                        c.execute(f"SELECT COUNT(*) FROM territories WHERE world_id=? AND owner_id IN ({placeholders})", [w_id] + members)
+                        camp_territories = c.fetchone()[0]
+                        camp_shares.append({"camp_name": c_name, "territories": camp_territories})
+                camp_shares.sort(key=lambda x: x["territories"], reverse=True)
+
+                data = {
+                    "territory_ranking": territory_leaderboard,
+                    "gold_ranking": gold_leaderboard,
+                    "camp_shares": camp_shares
+                }
+                
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                def _upload():
+                    supabase_client.table("world_status").upsert({"world_id": w_id, "updated_at": now_iso, "data": data}).execute()
+                await asyncio.to_thread(_upload)
+    except Exception as e:
+        logger.error(f"Supabase同期エラー: {e}")
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
